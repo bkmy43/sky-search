@@ -12,6 +12,8 @@ const config = {
   idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
 };
 
+const SKYLINE_COLUMNS = ['gender', 'color'];
+
 module.exports.hello = (event, context, callback) => {
 
   // create table items (
@@ -25,33 +27,79 @@ module.exports.hello = (event, context, callback) => {
   let db = pgp(config);
 
   let handleError = (err) => {
-    console.log(err);
-    callback(err);
+    // console.log(err);
+    closeConnection()
+      .then(() => callback(err));
   };
 
-  let closeConnection = () => {
-    return pgp.end();
-  };
-
-  let handleSuccess = (res) => {
-    console.log(res);
-    callback(null, {
-      statusCode: 200,
-      body: JSON.stringify(res),
+  let closeConnection = (res) => {
+    return new Promise((resolve) => {
+      pgp.end();
+      resolve(res);
     });
   };
 
-  let getSkyline = (item) => {
-    console.log(item[0]);
-    return db.query('select id, gender, color from items where gender = ${gender}', item[0]);
+  let handleSuccess = (res) => {
+    // console.log(res);
+    callback(null, {
+      statusCode: 200,
+      body: {
+        itemIds: res.map((item) => {return item.id}),
+        items: res,
+      },
+    });
+  };
+
+  let checkIfNotSkyline = (srcItem, item1, item2) => {
+    let col;
+    for (col of SKYLINE_COLUMNS) {
+      // console.log(Math.abs(item2[col] - item1[col]), srcItem[col]);
+      // if (Math.abs(item2[col] - item1[col]) <= srcItem[col]) {
+      // if (item2[col] <= item1[col]) {
+      if (Math.abs(item2[col] - srcItem[col]) <= Math.abs(item1[col] - srcItem[col])) {
+        return;
+      }
+    }
+    item1.is_skyline = false;
+    // if (
+    //   item2.gender > item1.gender &&
+    //   item2.color > item1.color &&
+    //   true
+    // ) {
+    //   item1.is_skyline = false;
+    // }
+  };
+
+  let iterateItems = (srcItem, items, item1) => {
+    return new Promise(() => {
+      items.map(checkIfNotSkyline.bind(null, srcItem, item1))
+    });
+  };
+
+  let itemsGeneralPromise = (srcItem, items) => {
+    items.map(iterateItems.bind(null, srcItem, items));
+    return Promise.all(items);
+  };
+
+  let getSkyline = (srcItem) => {
+    // console.log('source item', srcItem[0]);
+    return db.query(`select id, ${SKYLINE_COLUMNS.join(',')}, true as is_skyline from items where id != \${id}`, {id: srcItem[0].id})
+      .then(itemsGeneralPromise.bind(null, srcItem[0]));
+  };
+
+  let filterSkyline = (items) => {
+    return items.filter((item) => {
+      return item.is_skyline;
+    });
   };
 
   let getItem = (itemId) => {
-    return db.query('select id, gender, color from items where id = ${id}', {id: itemId});
+    return db.query(`select id, ${SKYLINE_COLUMNS.join(',')} from items where id = \${id}`, {id: itemId});
   };
 
   getItem(event.path.id)
     .then(getSkyline)
+    .then(filterSkyline)
     .then(closeConnection)
     .then(handleSuccess)
     .catch(handleError);
