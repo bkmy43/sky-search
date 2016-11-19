@@ -23,13 +23,14 @@ Options:
                             Log into a specified file. If not specified, logs are issued to stdout
 
 """
+import json
 import logging
 import os
 
 import sys
 import colorama
 
-#import psycopg2
+import psycopg2
 import math
 from docopt import docopt
 import settings
@@ -37,6 +38,8 @@ import settings
 import requests
 
 # getting logging
+from psycopg2._json import Json
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,8 +75,7 @@ def main():
         connection_string = 'postgresql://postgres:postgres@localhost:5432/postgres'
     if arguments['import-all']:
         logger.info('Connecting to DB... {0}'.format(connection_string))
-        #conn = psycopg2.connect(arguments['<connection_string>'])
-        #conn.init(logger)
+        conn = psycopg2.connect(arguments['<connection_string>'])
         logger.info('Connected to DB... {0}'.format(connection_string))
         logger.info('Fetching api metadata from {0}'.format(api_url))
         r = requests.get('{0}?{1}&{2}'.format(api_url, 'page=1', 'pageSize=1'))
@@ -84,7 +86,8 @@ def main():
             logger.info('Started fetching. Fetching {0} articles. Total size about {1}'.format(r_json['totalElements'],
                                                                                           r_size))
             n_pages = int(math.ceil(r_json['totalElements']/200))
-            #cur = conn.cursor()
+            # n_pages = 2 # for testing, comment in production
+            cur = conn.cursor()
             for page in range(1, n_pages):
                 req_page = requests.get('{0}?{1}&{2}'.format(api_url, 'page={0}'.format(page), 'pageSize=200'))
                 req_p_json = req_page.json()
@@ -93,11 +96,17 @@ def main():
                 logger.info(
                     'Fetched page {0} out of {1}. Each page has 200 articles.'
                         .format(page, n_pages))
-
+                exec_str = "INSERT INTO sky_search_data.input_json (ij_json) VALUES "
+                for content in req_p_json['content'][:-1]:
+                    exec_str += cur.mogrify("(%s),",[Json(content)])
+                exec_str += cur.mogrify("(%s);", [Json(req_p_json['content'][-1])])
+                cur.execute(exec_str)
+            conn.commit()
+            cur.close()
         else:
             print('Oops, something went wrong. Check the logs.')
             logger.exception('Request to Zalando API failed with status code {0}'.format(r.status_code))
-        #conn.close()
+        conn.close()
 
 
 def sizeof_fmt(num, suffix='B'):
