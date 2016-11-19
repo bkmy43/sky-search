@@ -12,9 +12,6 @@ const config = {
   idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
 };
 
-let db = pgp(config);
-
-
 module.exports.hello = (event, context, callback) => {
 
   // create table items (
@@ -25,9 +22,15 @@ module.exports.hello = (event, context, callback) => {
   //    season         INT     NOT NULL
   // );
 
+  let db = pgp(config);
+
   let handleError = (err) => {
     console.log(err);
     callback(err);
+  };
+
+  let closeConnection = () => {
+    return pgp.end();
   };
 
   let handleSuccess = (res) => {
@@ -43,12 +46,13 @@ module.exports.hello = (event, context, callback) => {
     return db.query('select id, gender, color from items where gender = ${gender}', item[0]);
   };
 
+  let getItem = (itemId) => {
+    return db.query('select id, gender, color from items where id = ${id}', {id: itemId});
+  };
+
   getItem(event.path.id)
     .then(getSkyline)
+    .then(closeConnection)
     .then(handleSuccess)
     .catch(handleError);
-};
-
-let getItem = (itemId) => {
-  return db.query('select id, gender, color from items where id = ${id}', {id: itemId});
 };
